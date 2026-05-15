@@ -22,7 +22,8 @@ A comprehensive interview preparation and assessment platform that helps candida
 ## 🛠️ Technology Stack
 
 ### Frontend
-- **Next.js 14** - React framework with server-side rendering
+- **React 18** - Modern UI component library
+- **Vite** - Lightning-fast build tool
 - **TypeScript** - Type-safe development
 - **Tailwind CSS** - Modern styling
 - **Shadcn UI** - Component library
@@ -72,7 +73,7 @@ pip install -r requirements.txt
 ### 3. Frontend Setup
 
 ```bash
-cd intraviewaiproject3
+cd frontend
 
 # Install dependencies
 npm install
@@ -95,10 +96,10 @@ NODEMAILER_PASSWORD=your_app_password
 GEMINI_API_KEY=your_gemini_api_key
 ```
 
-Create a `.env.local` file in the `intraviewaiproject3` directory:
+Create a `.env` file in the `frontend` directory:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
+VITE_API_URL=http://localhost:8000
 ```
 
 ### 5. Database Setup
@@ -136,13 +137,13 @@ Backend API will be available at `http://localhost:8000`
 ### Start Frontend Server
 
 ```bash
-cd intraviewaiproject3
+cd frontend
 npm run dev
 # or
 pnpm dev
 ```
 
-Frontend will be available at `http://localhost:3000`
+Frontend will be available at `http://localhost:8080`
 
 ## 📁 Project Structure
 
@@ -160,16 +161,14 @@ IntraView-AI/
 │   ├── data/               # Data files
 │   └── requirements.txt    # Python dependencies
 │
-├── intraviewaiproject3/    # Next.js frontend
-│   ├── app/                # Next.js app directory
-│   │   ├── admin/          # Admin pages
-│   │   ├── candidate/      # Candidate pages
-│   │   └── api/            # API routes
-│   ├── components/          # React components
-│   │   ├── pages/          # Page components
-│   │   └── ui/             # UI components
-│   ├── lib/                # Utility libraries
-│   └── public/             # Static assets
+├── frontend/               # React Vite frontend
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   ├── pages/          # Application routes
+│   │   ├── lib/            # Utility libraries
+│   │   └── hooks/          # Custom React hooks
+│   ├── public/             # Static assets
+│   └── package.json
 │
 └── README.md
 ```
@@ -264,7 +263,7 @@ Both frontend and backend support hot-reload in development mode.
 
 ### Code Structure
 - **Backend**: Follows FastAPI best practices with async/await
-- **Frontend**: Uses Next.js App Router with TypeScript
+- **Frontend**: Built with React 18 and Vite for lightning-fast HMR
 - **Components**: Reusable UI components with Shadcn UI
 
 ## 🐛 Troubleshooting
@@ -295,7 +294,7 @@ This project is licensed under the MIT License.
 ## 🙏 Acknowledgments
 
 - FastAPI for the excellent web framework
-- Next.js team for the React framework
+- Vite and React teams for the frontend architecture
 - MongoDB for the database solution
 - Google Gemini for AI capabilities
 - Shadcn for UI components

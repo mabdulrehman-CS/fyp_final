@@ -1,20 +1,19 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Annotated
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, EmailStr
 
 
+# Pydantic v2-compatible ObjectId type
 class PyObjectId(str):
-    """
-    Lightweight ObjectId-compatible type for Pydantic models.
-
-    We keep it as a string in the API surface but document that it maps to
-    MongoDB ObjectId under the hood.
-    """
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source, _handler):
+        from pydantic_core import core_schema
+        return core_schema.str_schema()
 
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_json_schema__(cls, _core_schema, handler):
+        return handler({"type": "string"})
 
     @classmethod
     def validate(cls, v: Any) -> "PyObjectId":
@@ -24,25 +23,23 @@ class PyObjectId(str):
 
 
 class User(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    email: EmailStr
-    password_hash: str
+    id: Optional[str] = Field(default=None, alias="_id")
+    email: str = ""
+    password_hash: str = ""
     role: str = "candidate"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     profile_info: Dict[str, Any] = Field(default_factory=dict)
     status: str = "active"
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str, datetime: lambda v: v.isoformat()}
+    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
 
 
 class Question(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    title: str
-    category: str  # Coding / Behavioral / System Design
+    id: Optional[str] = Field(default=None, alias="_id")
+    title: str = ""
+    category: str = ""
     difficulty: str = "Medium"
-    description: str
+    description: str = ""
     topics: Optional[List[str]] = None
     examples: Optional[List[Dict[str, Any]]] = None
     constraints: Optional[List[str]] = None
@@ -50,69 +47,55 @@ class Question(BaseModel):
     code_snippets: Optional[Dict[str, str]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str, datetime: lambda v: v.isoformat()}
+    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
 
 
 class TestCase(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    question_id: PyObjectId
-    input: str
-    output: str
+    id: Optional[str] = Field(default=None, alias="_id")
+    question_id: str = ""
+    input: str = ""
+    output: str = ""
     is_hidden: bool = False
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str}
+    model_config = {"populate_by_name": True}
 
 
 class Rubric(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    category: str
-    criteria: List[str]
-    weights: List[float]
+    id: Optional[str] = Field(default=None, alias="_id")
+    category: str = ""
+    criteria: List[str] = Field(default_factory=list)
+    weights: List[float] = Field(default_factory=list)
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str}
+    model_config = {"populate_by_name": True}
 
 
 class Session(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    candidate_id: PyObjectId
-    status: str
+    id: Optional[str] = Field(default=None, alias="_id")
+    candidate_id: str = ""
+    status: str = ""
     scores: Dict[str, float] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str, datetime: lambda v: v.isoformat()}
+    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
 
 
 class ActivityLog(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    action: str
-    admin_email: EmailStr
+    id: Optional[str] = Field(default=None, alias="_id")
+    action: str = ""
+    admin_email: str = ""
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str, datetime: lambda v: v.isoformat()}
+    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
 
 
 class InvitedCandidate(BaseModel):
-    id: Optional[PyObjectId] = Field(default=None, alias="_id")
-    email: EmailStr
-    name: str
-    invited_by: EmailStr  # Admin email who sent the invitation
+    id: Optional[str] = Field(default=None, alias="_id")
+    email: str = ""
+    name: str = ""
+    invited_by: str = ""
     invited_at: datetime = Field(default_factory=datetime.utcnow)
-    status: str = "pending"  # pending, accepted, expired
+    status: str = "pending"
     invitation_token: Optional[str] = None
 
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {PyObjectId: str, datetime: lambda v: v.isoformat()}
-
-
+    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}

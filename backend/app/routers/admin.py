@@ -171,7 +171,7 @@ async def get_admin_stats(
     total_candidates = await db["users"].count_documents({"role": "candidate"})
     # Count only active sessions created in the last 1 hour (truly active)
     one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-    active_sessions = await db["sessions"].count_documents({
+    active_sessions = await db["interview_sessions"].count_documents({
         "status": "active",
         "created_at": {"$gte": one_hour_ago}
     })
@@ -256,10 +256,14 @@ async def get_admin_stats(
             }
         )
 
+    # Count completed interviews
+    completed_sessions = await db["interview_sessions"].count_documents({"status": "completed"})
+
     return {
         "total_candidates": total_candidates,
         "active_sessions": active_sessions,
         "total_questions": total_questions,
+        "completed_sessions": completed_sessions,
         "recent_activity": recent_activity,
         "new_users_trend": new_users_trend,
         "category_distribution": category_distribution,
@@ -282,7 +286,7 @@ async def get_score_distribution(
         },
     ]
     
-    cursor = db["sessions"].aggregate(pipeline)
+    cursor = db["interview_sessions"].aggregate(pipeline)
     scores: List[float] = []
     async for doc in cursor:
         score = doc.get("score", 0)
@@ -340,7 +344,7 @@ async def get_skill_performance(
 ):
     """Get skill performance data for the 4 interview categories."""
     # Get all completed sessions with scores
-    cursor = db["sessions"].find({"status": "completed", "scores.overall": {"$exists": True, "$ne": None}})
+    cursor = db["interview_sessions"].find({"status": "completed", "scores.overall": {"$exists": True, "$ne": None}})
     
     # Initialize category scores
     category_scores = {

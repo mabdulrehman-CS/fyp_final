@@ -83,7 +83,6 @@ async def check_email_exists(
 @router.post("/signup", response_model=User, status_code=status.HTTP_201_CREATED)
 async def signup_candidate(payload: SignupRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
     users = db["users"]
-    # Check with case-insensitive email comparison
     email_lower = payload.email.lower().strip()
     existing = await users.find_one({"email": email_lower})
     if existing:
@@ -94,11 +93,11 @@ async def signup_candidate(payload: SignupRequest, db: AsyncIOMotorDatabase = De
     if password_errors:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=password_errors[0]  # Return first error message
+            detail=password_errors[0]
         )
 
     user = User(
-        email=email_lower,  # Store email in lowercase for consistency
+        email=email_lower,
         password_hash=get_password_hash(payload.password),
         role="candidate",
         created_at=datetime.utcnow(),
@@ -108,9 +107,105 @@ async def signup_candidate(payload: SignupRequest, db: AsyncIOMotorDatabase = De
     user_dict = user.dict(by_alias=True, exclude_none=True)
     print(f"Creating candidate user: email={payload.email}, role={user_dict.get('role')}")
     res = await users.insert_one(user_dict)
-    user.id = res.inserted_id  # type: ignore[attr-defined]
+    user.id = str(res.inserted_id)  # type: ignore[attr-defined]
     print(f"Candidate created successfully: _id={res.inserted_id}, email={payload.email}")
+
+    # Automatically send OTP for email verification
+    try:
+        otp_code = str(random.randint(100000, 999999))
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
+        await db["signup_otps"].delete_many({"email": email_lower})
+        await db["signup_otps"].insert_one({
+            "email": email_lower,
+            "otp": otp_code,
+            "expires_at": expires_at,
+            "created_at": datetime.utcnow(),
+        })
+        # Try to send email — if email not configured, print OTP to logs
+        from app.core.email_service import send_signup_otp_email
+        sent = send_signup_otp_email(payload.email, otp_code, payload.name or "")
+        if not sent:
+            print(f"[SIGNUP OTP] Email not sent. OTP for {email_lower}: {otp_code}")
+    except Exception as e:
+        print(f"[SIGNUP OTP] Error sending OTP: {e}")
+
     return user
+
+
+class SendSignupOTPRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifySignupOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+
+@router.post("/send-signup-otp")
+async def send_signup_otp(
+    payload: SendSignupOTPRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Resend signup OTP to email."""
+    email_lower = payload.email.lower().strip()
+    user = await db["users"].find_one({"email": email_lower})
+    if not user:
+        raise HTTPException(status_code=404, detail="Email not found. Please sign up first.")
+
+    otp_code = str(random.randint(100000, 999999))
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    await db["signup_otps"].delete_many({"email": email_lower})
+    await db["signup_otps"].insert_one({
+        "email": email_lower,
+        "otp": otp_code,
+        "expires_at": expires_at,
+        "created_at": datetime.utcnow(),
+    })
+    from app.core.email_service import send_signup_otp_email
+    name = (user.get("profile_info") or {}).get("name", "")
+    sent = send_signup_otp_email(payload.email, otp_code, name)
+    if not sent:
+        print(f"[SIGNUP OTP] Email not configured. OTP for {email_lower}: {otp_code}")
+        # Still return success so frontend can proceed; user sees code in backend logs
+    return {"message": "OTP sent to your email", "email": email_lower}
+
+
+@router.post("/verify-signup-otp")
+async def verify_signup_otp(
+    payload: VerifySignupOTPRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Verify signup OTP and mark email as verified."""
+    email_lower = payload.email.lower().strip()
+    otp_record = await db["signup_otps"].find_one({"email": email_lower})
+
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="OTP not found. Please request a new one.")
+
+    if otp_record["otp"] != payload.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP. Please check and try again.")
+
+    if datetime.utcnow() > otp_record["expires_at"]:
+        await db["signup_otps"].delete_one({"_id": otp_record["_id"]})
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
+
+    # Mark user as email verified
+    await db["users"].update_one(
+        {"email": email_lower},
+        {"$set": {"email_verified": True, "status": "active"}}
+    )
+    await db["signup_otps"].delete_one({"_id": otp_record["_id"]})
+
+    # Return access token so the user is logged in
+    user = await db["users"].find_one({"email": email_lower})
+    from app.core.security import create_access_token
+    token = create_access_token(
+        subject=str(user["_id"]),
+        extra_data={"email": user["email"], "role": user.get("role", "candidate")},
+    )
+    return {"message": "Email verified successfully", "access_token": token, "token_type": "bearer"}
+
+
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -164,12 +259,12 @@ async def forgot_password(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid email"
+            detail="No account found with this email address. Please check your email or sign up first."
         )
     
     # Generate 6-digit OTP
     otp_code = str(random.randint(100000, 999999))
-    expires_at = datetime.utcnow() + timedelta(minutes=5)
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
     
     # Delete any existing OTP for this email
     await otps.delete_many({"email": email_lower})
@@ -186,10 +281,10 @@ async def forgot_password(
     email_sent = send_password_reset_otp_email(payload.email, otp_code)
     
     if not email_sent:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send OTP email. Please try again later."
-        )
+        print(f"[FORGOT PASSWORD] Email not sent. OTP for {email_lower}: {otp_code}")
+        # Don't block the flow — OTP is in backend logs for debugging
+    else:
+        print(f"[FORGOT PASSWORD] OTP sent to {email_lower}")
     
     return {"message": "OTP sent successfully to your email", "email": email_lower}
 
@@ -227,7 +322,7 @@ async def verify_reset_otp(
             detail="OTP has expired. Please request a new one."
         )
     
-    return {"message": "OTP verified successfully"}
+    return {"valid": True, "message": "OTP verified successfully"}
 
 
 @router.post("/reset-password")

@@ -69,20 +69,27 @@ async def list_questions(
     query: Dict[str, Any] = {}
 
     if search:
-        query["title"] = {"$regex": search, "$options": "i"}
+        # Use text search index for performance over 500k records
+        query["$text"] = {"$search": search}
     if category:
-        query["category"] = category
+        query["category"] = {"$regex": f"^{category}$", "$options": "i"}
     if programming_subcategory:
         query["programming_subcategory"] = programming_subcategory
     if difficulty:
-        query["difficulty"] = difficulty
+        query["difficulty"] = {"$regex": f"^{difficulty}$", "$options": "i"}
 
     total = await db["questions"].count_documents(query)
     cursor = db["questions"].find(query).sort("created_at", -1).skip(skip).limit(limit)
 
     items: List[Dict[str, Any]] = []
     async for doc in cursor:
-        items.append(_to_str_id(doc))
+        doc = _to_str_id(doc)
+        # Normalize: ensure title exists (some docs have question_text instead)
+        if not doc.get("title") and doc.get("question_text"):
+            doc["title"] = doc["question_text"]
+        if not doc.get("description") and doc.get("question_text"):
+            doc["description"] = doc["question_text"]
+        items.append(doc)
 
     return {"items": items, "total": total, "page": page, "limit": limit}
 
@@ -118,7 +125,12 @@ async def get_question(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
     
-    return _to_str_id(doc)
+    doc = _to_str_id(doc)
+    if not doc.get("title") and doc.get("question_text"):
+        doc["title"] = doc["question_text"]
+    if not doc.get("description") and doc.get("question_text"):
+        doc["description"] = doc["question_text"]
+    return doc
 
 
 @router.post("/questions", status_code=status.HTTP_201_CREATED)
@@ -146,6 +158,41 @@ async def create_question(
         metadata={"question_id": str(res.inserted_id), "title": payload.title},
     )
     return _to_str_id(created)
+
+
+@router.post("/questions/bulk", status_code=status.HTTP_201_CREATED)
+async def bulk_create_questions(
+    payload: List[QuestionCreate],
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """Bulk create questions from an array."""
+    if not payload:
+        raise HTTPException(status_code=400, detail="Empty list")
+    
+    docs = []
+    for p in payload:
+        question = Question(
+            title=p.title,
+            category=p.category,
+            difficulty=p.difficulty,
+            description=p.description,
+            created_at=datetime.utcnow(),
+        )
+        q_dict = question.dict(by_alias=True, exclude_none=True)
+        if p.programming_subcategory:
+            q_dict["programming_subcategory"] = p.programming_subcategory
+        docs.append(q_dict)
+        
+    res = await db["questions"].insert_many(docs)
+    
+    await _log_activity(
+        db,
+        admin_email=admin["email"],
+        action="bulk_create_questions",
+        metadata={"count": len(docs)},
+    )
+    return {"message": f"Successfully created {len(docs)} questions", "inserted_ids": [str(i) for i in res.inserted_ids]}
 
 
 @router.put("/questions/{question_id}")

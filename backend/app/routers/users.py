@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, EmailStr
 
@@ -177,6 +177,38 @@ async def change_password(
     )
     
     return {"status": "ok", "message": "Password changed successfully"}
+
+
+@router.get("/users/me/notification-preferences")
+async def get_notification_preferences(
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Get current user's notification preferences."""
+    user_doc = await db["users"].find_one({"_id": user["_id"]})
+    defaults = {
+        "email": True,
+        "interviewReminders": True,
+        "reportReady": True,
+        "recommendations": False,
+    }
+    prefs = user_doc.get("notification_preferences", defaults) if user_doc else defaults
+    return prefs
+
+
+@router.post("/users/me/notification-preferences")
+async def update_notification_preferences(
+    request: Request,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Update current user's notification preferences."""
+    prefs = await request.json()
+    await db["users"].update_one(
+        {"_id": user["_id"]},
+        {"$set": {"notification_preferences": prefs}}
+    )
+    return {"status": "ok", "message": "Notification preferences updated"}
 
 
 @router.post("/users/me/update-email")
@@ -430,24 +462,73 @@ def extract_text_from_docx(file_path: Path) -> str:
 
 
 def parse_cv_text(text: str) -> Dict[str, Any]:
-    """Parse CV text and extract structured information."""
+    """Parse CV text and extract structured information. Uses Groq AI if available."""
     
+    # Try Groq AI parsing first
+    try:
+        from app.core.config import get_settings
+        settings = get_settings()
+        if settings.GROQ_API_KEY:
+            from groq import Groq
+            client = Groq(api_key=settings.GROQ_API_KEY)
+            prompt = f"""You are an expert HR data extraction system. Extract structured information from the provided CV/Resume text.
+Return ONLY a strictly valid JSON object matching the exact schema below.
+
+CRITICAL INSTRUCTION: You MUST extract EVERY SINGLE project, education degree, and work experience listed in the text. NEVER summarize, group, or truncate the arrays. If the candidate lists 10 skills, return all 10. If they list 4 jobs, return all 4. 
+
+Schema:
+{{
+  "name": "full name",
+  "email": "email address",
+  "phone": "phone number",
+  "location": "city, country",
+  "linkedin": "linkedin URL or empty",
+  "github": "github URL or empty",
+  "bio": "2-3 sentence professional summary",
+  "education": [{{"institution": "name", "degree": "degree type", "field": "field of study", "start_date": "", "end_date": ""}}],
+  "work_experience": [{{"company": "name", "title": "job title", "description": "detailed description of duties", "start_date": "", "end_date": "", "location": ""}}],
+  "projects": [{{"title": "project name", "description": "detailed description of the project", "technologies": "comma separated tech stack", "github_url": ""}}],
+  "skills": ["skill1", "skill2", "skill3"]
+}}
+
+CV Text:
+{text[:10000]}"""
+            
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=4000,
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content.strip()
+            # Clean up response
+            if "```" in content:
+                import re as re2
+                match = re2.search(r'```(?:json)?\s*(.*?)```', content, re2.DOTALL)
+                if match:
+                    content = match.group(1).strip()
+            
+            import json
+            parsed = json.loads(content)
+            # Ensure all expected keys exist
+            defaults = {"name": "", "email": "", "phone": "", "location": "", "linkedin": "", "github": "", "bio": "", "education": [], "work_experience": [], "projects": [], "skills": []}
+            for k, v in defaults.items():
+                if k not in parsed:
+                    parsed[k] = v
+            print(f"[CV PARSE] Groq AI extracted: {parsed.get('name', '?')}, {len(parsed.get('skills', []))} skills")
+            return parsed
+    except Exception as e:
+        print(f"[CV PARSE] Groq AI parsing failed, falling back to regex: {e}")
+    
+    # Fallback: regex-based parsing
     parsed_data = {
-        "name": "",
-        "email": "",
-        "phone": "",
-        "location": "",
-        "linkedin": "",
-        "github": "",
-        "bio": "",
-        "education": [],
-        "work_experience": [],
-        "projects": [],
-        "skills": [],
+        "name": "", "email": "", "phone": "", "location": "",
+        "linkedin": "", "github": "", "bio": "",
+        "education": [], "work_experience": [], "projects": [], "skills": [],
     }
     
     lines = text.split("\n")
-    current_section = None
     
     # Extract email
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -459,7 +540,6 @@ def parse_cv_text(text: str) -> Dict[str, Any]:
     phone_patterns = [
         r'\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',
         r'\d{3}[-.\s]?\d{3}[-.\s]?\d{4}',
-        r'\d{10,}',
     ]
     for pattern in phone_patterns:
         phones = re.findall(pattern, text)
@@ -467,151 +547,47 @@ def parse_cv_text(text: str) -> Dict[str, Any]:
             parsed_data["phone"] = phones[0]
             break
     
-    # Extract LinkedIn and GitHub URLs
-    linkedin_pattern = r'linkedin\.com/in/[\w-]+'
-    github_pattern = r'github\.com/[\w-]+'
-    linkedin_matches = re.findall(linkedin_pattern, text, re.IGNORECASE)
-    github_matches = re.findall(github_pattern, text, re.IGNORECASE)
+    # Extract LinkedIn and GitHub
+    linkedin_matches = re.findall(r'linkedin\.com/in/[\w-]+', text, re.IGNORECASE)
+    github_matches = re.findall(r'github\.com/[\w-]+', text, re.IGNORECASE)
     if linkedin_matches:
         parsed_data["linkedin"] = f"https://{linkedin_matches[0]}"
     if github_matches:
         parsed_data["github"] = f"https://{github_matches[0]}"
     
-    # Extract name (usually first line or before email)
-    for i, line in enumerate(lines[:10]):
+    # Extract name
+    for line in lines[:10]:
         line = line.strip()
         if line and not re.search(email_pattern, line) and not re.search(r'phone|email|contact', line, re.IGNORECASE):
             if len(line.split()) <= 4 and line[0].isupper():
                 parsed_data["name"] = line
                 break
     
-    # Extract location (look for common location patterns)
-    location_patterns = [
-        r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(Islamabad|Karachi|Lahore|Rawalpindi|Faisalabad|Multan|Peshawar|Quetta|Hyderabad)',
-        r'(Pakistan|USA|United States|UK|United Kingdom)',
-    ]
-    for line in lines[:30]:
-        for pattern in location_patterns:
-            match = re.search(pattern, line, re.IGNORECASE)
-            if match:
-                parsed_data["location"] = line.strip()
-                break
-        if parsed_data["location"]:
-            break
-    
-    # Extract sections
+    # Extract skills
+    current_section = None
     section_keywords = {
         "education": ["education", "educational", "academic"],
-        "experience": ["experience", "work experience", "employment", "employment history"],
+        "experience": ["experience", "work experience", "employment"],
         "projects": ["projects", "project", "portfolio"],
         "skills": ["skills", "technical skills", "competencies", "expertise"],
-        "summary": ["summary", "about", "profile", "objective", "professional summary"],
+        "summary": ["summary", "about", "profile", "objective"],
     }
     
-    for i, line in enumerate(lines):
+    for line in lines:
         line_lower = line.lower().strip()
         for section, keywords in section_keywords.items():
             if any(keyword in line_lower for keyword in keywords) and len(line.split()) < 5:
                 current_section = section
                 break
         
-        if current_section == "summary" and line.strip() and not any(kw in line.lower() for kw in ["summary", "about", "profile"]):
-            parsed_data["bio"] += line.strip() + " "
-        elif current_section == "skills" and line.strip():
-            # Extract skills (comma-separated or bullet points)
-            skills_line = re.split(r'[,•\-\*]', line)
+        if current_section == "skills" and line.strip():
+            skills_line = re.split(r'[,•\-\*|]', line)
             for skill in skills_line:
                 skill = skill.strip()
-                if skill and len(skill) > 2:
+                if skill and len(skill) > 1 and len(skill) < 50:
                     parsed_data["skills"].append(skill)
-        elif current_section == "education" and line.strip():
-            # Enhanced education extraction
-            line_lower = line.lower()
-            if any(word in line_lower for word in ["university", "college", "institute", "school"]):
-                # Try to extract dates
-                date_pattern = r'(\w+\s+\d{4})\s*-\s*(\w+\s+\d{4}|Present|Ongoing)'
-                dates = re.search(date_pattern, line, re.IGNORECASE)
-                start_date = dates.group(1) if dates else ""
-                end_date = dates.group(2) if dates else ""
-                
-                # Extract degree and field
-                degree_match = re.search(r'(Bachelor|Master|PhD|Doctorate|Diploma|Certificate)', line, re.IGNORECASE)
-                degree = degree_match.group(0) if degree_match else ""
-                
-                # Extract field of study
-                field_match = re.search(r'(?:in|of|,)\s*([A-Z][^,]+)', line)
-                field = field_match.group(1).strip() if field_match else ""
-                
-                institution = line.split(",")[0].strip() if "," in line else line.strip()
-                
-                parsed_data["education"].append({
-                    "institution": institution,
-                    "degree": degree,
-                    "field": field,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                })
-        elif current_section == "experience" and line.strip():
-            # Enhanced experience extraction
-            line_lower = line.lower()
-            if any(word in line_lower for word in ["developer", "engineer", "analyst", "manager", "intern", "developer", "solutions", "company"]):
-                # Try to extract dates
-                date_pattern = r'(\w+\s+\d{4})\s*-\s*(\w+\s+\d{4}|Present|Current)'
-                dates = re.search(date_pattern, line, re.IGNORECASE)
-                start_date = dates.group(1) if dates else ""
-                end_date = dates.group(2) if dates else ""
-                
-                # Extract title and company
-                parts = line.split("•")
-                if len(parts) >= 2:
-                    title = parts[0].strip()
-                    company = parts[1].strip() if len(parts) > 1 else ""
-                else:
-                    # Try to extract from common patterns
-                    title_match = re.search(r'([A-Z][a-z]+\s+(?:Developer|Engineer|Analyst|Manager|Intern))', line)
-                    title = title_match.group(0) if title_match else ""
-                    company = line.replace(title, "").strip()
-                
-                parsed_data["work_experience"].append({
-                    "company": company or line.strip(),
-                    "title": title,
-                    "description": "",
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "location": "",
-                })
-        elif current_section == "projects" and line.strip():
-            # Enhanced project extraction
-            line_lower = line.lower()
-            if any(word in line_lower for word in ["project", "dashboard", "system", "application", "api", "geocoder", "management"]):
-                # Extract GitHub URL if present
-                github_match = re.search(r'github\.com/[\w/-]+', line, re.IGNORECASE)
-                github_url = f"https://{github_match.group(0)}" if github_match else ""
-                
-                # Extract dates
-                date_pattern = r'(\w+\s+\d{4})\s*-\s*(\w+\s+\d{4})'
-                dates = re.search(date_pattern, line, re.IGNORECASE)
-                start_date = dates.group(1) if dates else ""
-                end_date = dates.group(2) if dates else ""
-                
-                title = line.split("•")[0].strip() if "•" in line else line.strip()
-                
-                parsed_data["projects"].append({
-                    "title": title,
-                    "description": "",
-                    "technologies": "",
-                    "github_url": github_url,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                })
     
-    # Clean up bio
-    parsed_data["bio"] = parsed_data["bio"].strip()
-    
-    # Remove duplicates from skills
-    parsed_data["skills"] = list(dict.fromkeys(parsed_data["skills"]))[:20]  # Limit to 20 skills
-    
+    parsed_data["skills"] = list(dict.fromkeys(parsed_data["skills"]))[:30]
     return parsed_data
 
 
@@ -681,29 +657,28 @@ async def upload_cv(
             
             if text:
                 parsed_data = parse_cv_text(text)
-                # Merge parsed data into profile_info (don't overwrite existing data)
-                if parsed_data.get("name") and not profile_info.get("name"):
+                profile_info["cv_parsed"] = True
+                # Always overwrite CV-extracted sections
+                if parsed_data.get("name"):
                     profile_info["name"] = parsed_data["name"]
-                if parsed_data.get("phone") and not profile_info.get("phone"):
+                if parsed_data.get("phone"):
                     profile_info["phone"] = parsed_data["phone"]
-                if parsed_data.get("location") and not profile_info.get("location"):
+                if parsed_data.get("location"):
                     profile_info["location"] = parsed_data["location"]
-                if parsed_data.get("linkedin") and not profile_info.get("linkedin"):
+                if parsed_data.get("linkedin"):
                     profile_info["linkedin"] = parsed_data["linkedin"]
-                if parsed_data.get("github") and not profile_info.get("github"):
+                if parsed_data.get("github"):
                     profile_info["github"] = parsed_data["github"]
-                if parsed_data.get("bio") and not profile_info.get("bio"):
+                if parsed_data.get("bio"):
                     profile_info["bio"] = parsed_data["bio"]
-                if parsed_data.get("education") and not profile_info.get("education"):
+                if parsed_data.get("education"):
                     profile_info["education"] = parsed_data["education"]
-                if parsed_data.get("work_experience") and not profile_info.get("work_experience"):
+                if parsed_data.get("work_experience"):
                     profile_info["work_experience"] = parsed_data["work_experience"]
-                if parsed_data.get("projects") and not profile_info.get("projects"):
+                if parsed_data.get("projects"):
                     profile_info["projects"] = parsed_data["projects"]
                 if parsed_data.get("skills"):
-                    existing_skills = profile_info.get("skills", [])
-                    new_skills = [s for s in parsed_data["skills"] if s not in existing_skills]
-                    profile_info["skills"] = existing_skills + new_skills
+                    profile_info["skills"] = parsed_data["skills"]
         except Exception as e:
             print(f"Error parsing CV: {e}")
             parsed_data = None
@@ -903,9 +878,14 @@ async def list_candidates(
     pipeline = [
         {"$match": {"role": "candidate"}},
         {
+            "$addFields": {
+                "user_id_str": {"$toString": "$_id"}
+            }
+        },
+        {
             "$lookup": {
-                "from": "sessions",
-                "localField": "_id",
+                "from": "interview_sessions",
+                "localField": "user_id_str",
                 "foreignField": "candidate_id",
                 "as": "all_sessions",
             }
@@ -930,7 +910,7 @@ async def list_candidates(
                 "lastInterview": {
                     "$cond": {
                         "if": {"$gt": [{"$size": "$completed_sessions"}, 0]},
-                        "then": {"$max": "$completed_sessions.created_at"},
+                        "then": {"$max": "$completed_sessions.end_time"},
                         "else": None
                     }
                 },
@@ -941,7 +921,7 @@ async def list_candidates(
                             "$map": {
                                 "input": "$completed_sessions",
                                 "as": "session",
-                                "in": "$$session.scores.overall"
+                                "in": "$$session.final_report.overall_score"
                             }
                         },
                         "as": "score",
