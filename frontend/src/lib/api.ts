@@ -3,7 +3,7 @@
  * Replaces Supabase with direct FastAPI calls
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Token management
 let accessToken: string | null = localStorage.getItem('access_token');
@@ -602,10 +602,10 @@ export const aiInterviewAPI = {
     return apiCallFormData('/api/interview/upload-cv', formData);
   },
 
-  startFromProfile: async (position: string): Promise<{ session_id: string; candidate_name: string; position: string; extracted_skills: string[] }> => {
+  startFromProfile: async (position: string, interviewMode: string = 'position', course: string = ''): Promise<{ session_id: string; candidate_name: string; position: string; interview_mode: string; course: string; extracted_skills: string[] }> => {
     return apiCall('/api/interview/start-from-profile', {
       method: 'POST',
-      body: JSON.stringify({ position }),
+      body: JSON.stringify({ position, interview_mode: interviewMode, course }),
     });
   },
 

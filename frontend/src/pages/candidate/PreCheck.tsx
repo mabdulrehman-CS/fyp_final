@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Mic, Monitor, CheckCircle, XCircle, Loader2, ArrowRight, Briefcase, AlertTriangle } from 'lucide-react';
+import { Camera, Mic, Monitor, CheckCircle, XCircle, Loader2, ArrowRight, Briefcase, AlertTriangle, GraduationCap } from 'lucide-react';
 import { aiInterviewAPI } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { CandidateLayout } from '@/components/layouts/CandidateLayout';
@@ -13,6 +13,8 @@ const PreCheck: React.FC = () => {
   const [micOk, setMicOk] = useState(false);
   const [screenOk, setScreenOk] = useState(false);
   const [position, setPosition] = useState('');
+  const [course, setCourse] = useState('');
+  const [interviewMode, setInterviewMode] = useState<'position' | 'course'>('position');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
   const [micLevel, setMicLevel] = useState(0);
@@ -119,14 +121,21 @@ const PreCheck: React.FC = () => {
   // Check if CV is uploaded by checking cv_filename
   const hasCv = !!(user?.profile_info?.cv_filename || user?.profile_info?.cv_url);
 
+  const inputValue = interviewMode === 'course' ? course : position;
+
   const handleStartInterview = async () => {
-    if (!position.trim()) { setError('Please enter the position you are interviewing for.'); return; }
+    if (interviewMode === 'course' && !course.trim()) { setError('Please enter the course name.'); return; }
+    if (interviewMode === 'position' && !position.trim()) { setError('Please enter the position you are interviewing for.'); return; }
     if (!allChecked) { setError('Please complete all permission checks.'); return; }
 
     setStarting(true);
     setError('');
     try {
-      const result = await aiInterviewAPI.startFromProfile(position.trim());
+      const result = await aiInterviewAPI.startFromProfile(
+        interviewMode === 'position' ? position.trim() : '',
+        interviewMode,
+        interviewMode === 'course' ? course.trim() : ''
+      );
       navigate(`/interview/${result.session_id}`, { 
         state: { 
           sessionData: result,
@@ -244,20 +253,60 @@ const PreCheck: React.FC = () => {
             <p className="px-4 text-xs text-emerald-400">✓ Screen sharing active. Do not stop sharing during the interview.</p>
           )}
 
-          {/* Position Input */}
+          {/* Interview Mode Toggle */}
+          <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+            <p className="text-white font-medium mb-3">Interview Type</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setInterviewMode('position')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  interviewMode === 'position'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25'
+                    : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-white/10'
+                }`}
+              >
+                <Briefcase className="w-4 h-4" /> Position Based
+              </button>
+              <button
+                onClick={() => setInterviewMode('course')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  interviewMode === 'course'
+                    ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/25'
+                    : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-white/10'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4" /> Course Based
+              </button>
+            </div>
+          </div>
+
+          {/* Position / Course Input */}
           <div className="p-4 rounded-xl bg-white/5 border border-white/10">
             <label className="block text-white font-medium mb-2">
               <div className="flex items-center gap-2 mb-2">
-                <Briefcase className="w-4 h-4 text-indigo-400" />
-                Interview Position / Role
+                {interviewMode === 'course' ? (
+                  <><GraduationCap className="w-4 h-4 text-purple-400" /> Course Name</>
+                ) : (
+                  <><Briefcase className="w-4 h-4 text-indigo-400" /> Interview Position / Role</>
+                )}
               </div>
-              <input
-                type="text"
-                value={position}
-                onChange={e => setPosition(e.target.value)}
-                placeholder="e.g. Frontend Developer, Data Scientist, DevOps Engineer..."
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 text-sm"
-              />
+              {interviewMode === 'course' ? (
+                <input
+                  type="text"
+                  value={course}
+                  onChange={e => setCourse(e.target.value)}
+                  placeholder="e.g. OOP, Data Structures, Operating Systems, DBMS..."
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 text-sm"
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={position}
+                  onChange={e => setPosition(e.target.value)}
+                  placeholder="e.g. Frontend Developer, Data Scientist, DevOps Engineer..."
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 text-sm"
+                />
+              )}
             </label>
           </div>
 
@@ -281,13 +330,17 @@ const PreCheck: React.FC = () => {
           {/* Start Button */}
           <button
             onClick={handleStartInterview}
-            disabled={!allChecked || !position.trim() || starting}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            disabled={!allChecked || !inputValue.trim() || starting}
+            className={`w-full py-3 rounded-xl bg-gradient-to-r ${
+              interviewMode === 'course'
+                ? 'from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500'
+                : 'from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500'
+            } text-white font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
           >
             {starting ? (
               <><Loader2 className="w-5 h-5 animate-spin" /> Preparing Interview...</>
             ) : (
-              <><ArrowRight className="w-5 h-5" /> Start Interview</>
+              <><ArrowRight className="w-5 h-5" /> {interviewMode === 'course' ? 'Start Course Assessment' : 'Start Interview'}</>
             )}
           </button>
         </div>

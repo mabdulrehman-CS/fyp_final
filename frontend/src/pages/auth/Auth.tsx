@@ -11,7 +11,7 @@ import { Mail, Lock, User, ArrowLeft, Loader2, ShieldCheck, RefreshCw, Eye, EyeO
 import { toast } from 'sonner';
 import { authAPI } from '@/lib/api';
 
-const API_BASE = (import.meta as any).env?.VITE_BACKEND_URL || 'http://localhost:8000';
+const API_BASE = (import.meta as any).env?.VITE_API_URL || '';
 
 async function callApi(path: string, body: object) {
   const res = await fetch(`${API_BASE}${path}`, {

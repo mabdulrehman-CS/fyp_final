@@ -122,7 +122,9 @@ async def upload_cv(file: UploadFile = File(...), db: AsyncIOMotorDatabase = Dep
 # ── Start from Profile (no CV upload needed — uses profile data) ──
 
 class StartFromProfileRequest(BaseModel):
-    position: str
+    position: str = ""
+    interview_mode: str = "position"  # "position" or "course"
+    course: Optional[str] = None
 
 @router.get("/sessions")
 async def get_candidate_sessions(
@@ -147,8 +149,19 @@ async def start_from_profile(
 ):
     """Create interview session from the user's profile data."""
     try:
-        position = body.position.strip()
-        position_lower = position.lower()
+        interview_mode = body.interview_mode.strip().lower() if body.interview_mode else "position"
+        course = body.course.strip() if body.course else None
+        position = body.position.strip() if body.position else ""
+        
+        # For course mode, use course as the label; for position mode, use position
+        if interview_mode == "course":
+            if not course:
+                raise HTTPException(status_code=400, detail="Please enter a course name.")
+            label = course
+        else:
+            if not position:
+                raise HTTPException(status_code=400, detail="Please enter the position you are interviewing for.")
+            label = position
 
         # Check for active or pending sessions
         existing_session = await db["interview_sessions"].find_one({
@@ -175,31 +188,61 @@ async def start_from_profile(
             skills = profile.get("skills", [])
             projects = profile.get("projects", [])
 
-        
-        # If no skills from profile, use position-based mapping
-        if not skills:
-            skill_map = {
-                "frontend": ["javascript", "react", "html", "css", "typescript"],
-                "backend": ["python", "java", "node.js", "sql", "api"],
-                "fullstack": ["javascript", "react", "python", "node.js", "sql"],
-                "data": ["python", "sql", "machine learning", "pandas", "numpy"],
-                "devops": ["docker", "kubernetes", "ci/cd", "aws", "linux"],
-                "mobile": ["react native", "flutter", "swift", "kotlin", "mobile"],
-                "ml": ["python", "machine learning", "tensorflow", "deep learning", "nlp"],
-                "ai": ["python", "machine learning", "deep learning", "nlp", "computer vision"],
+        # For course mode, override skills with course-relevant topics
+        if interview_mode == "course":
+            course_lower = course.lower()
+            course_skill_map = {
+                "oop": ["classes", "inheritance", "polymorphism", "encapsulation", "abstraction", "design patterns"],
+                "object oriented": ["classes", "inheritance", "polymorphism", "encapsulation", "abstraction", "design patterns"],
+                "data structure": ["arrays", "linked lists", "stacks", "queues", "trees", "graphs", "hash tables"],
+                "dsa": ["arrays", "linked lists", "stacks", "queues", "trees", "graphs", "sorting", "searching"],
+                "database": ["sql", "normalization", "joins", "indexing", "transactions", "er diagrams"],
+                "dbms": ["sql", "normalization", "joins", "indexing", "transactions", "er diagrams"],
+                "operating system": ["processes", "threads", "memory management", "scheduling", "deadlocks", "file systems"],
+                "os": ["processes", "threads", "memory management", "scheduling", "deadlocks"],
+                "computer network": ["tcp/ip", "osi model", "routing", "dns", "http", "sockets"],
+                "networking": ["tcp/ip", "osi model", "routing", "dns", "http", "sockets"],
+                "machine learning": ["regression", "classification", "neural networks", "overfitting", "cross-validation"],
+                "ai": ["search algorithms", "neural networks", "nlp", "computer vision", "reinforcement learning"],
+                "web development": ["html", "css", "javascript", "react", "node.js", "rest apis"],
+                "software engineering": ["sdlc", "agile", "testing", "design patterns", "version control"],
             }
-            for key, vals in skill_map.items():
-                if key in position_lower:
+            skills = []
+            for key, vals in course_skill_map.items():
+                if key in course_lower:
                     skills = vals
                     break
             if not skills:
-                skills = ["programming", "problem solving", "algorithms"]
+                skills = [course.lower(), "programming", "problem solving"]
+        else:
+            # Position mode: If no skills from profile, use position-based mapping
+            if not skills:
+                position_lower = position.lower()
+                skill_map = {
+                    "frontend": ["javascript", "react", "html", "css", "typescript"],
+                    "backend": ["python", "java", "node.js", "sql", "api"],
+                    "fullstack": ["javascript", "react", "python", "node.js", "sql"],
+                    "data": ["python", "sql", "machine learning", "pandas", "numpy"],
+                    "devops": ["docker", "kubernetes", "ci/cd", "aws", "linux"],
+                    "mobile": ["react native", "flutter", "swift", "kotlin", "mobile"],
+                    "ml": ["python", "machine learning", "tensorflow", "deep learning", "nlp"],
+                    "ai": ["python", "machine learning", "deep learning", "nlp", "computer vision"],
+                }
+                for key, vals in skill_map.items():
+                    if key in position_lower:
+                        skills = vals
+                        break
+                if not skills:
+                    skills = ["programming", "problem solving", "algorithms"]
 
         # Create interview session
         session_doc = {
             "candidate_id": str(user["_id"]),
             "candidate_name": candidate_name,
-            "position": position,
+            "interview_mode": interview_mode,
+            "position": position if interview_mode == "position" else "",
+            "course": course if interview_mode == "course" else "",
+            "interview_type": "general",  # kept for admin sessions page compatibility
             "cv_extracted_skills": skills,
             "cv_projects": projects,
             "status": "pre_check",
@@ -216,8 +259,12 @@ async def start_from_profile(
             "session_id": str(session_result.inserted_id),
             "candidate_name": candidate_name,
             "position": position,
+            "interview_mode": interview_mode,
+            "course": course or "",
             "extracted_skills": skills,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -266,9 +313,26 @@ async def start_interview(session_id: str, db: AsyncIOMotorDatabase = Depends(ge
 
         skills = session.get("cv_extracted_skills", [])
         position = session.get("position", "Software Engineer")
+        interview_mode = session.get("interview_mode", "position")
+        course = session.get("course", "")
+        candidate_name = session.get('candidate_name', 'there')
+
+        if interview_mode == "course" and course:
+            first_question_text = (
+                f"Hi {candidate_name}, welcome to your {course} course assessment. "
+                f"Let's begin with a warm-up. Could you briefly introduce yourself and tell me "
+                f"what you know about {course} and why you find it interesting?"
+            )
+        else:
+            first_question_text = (
+                f"Hi {candidate_name}, I see you're interviewing for the {position} role. "
+                f"I've reviewed your resume. Could you start by introducing yourself and "
+                f"highlighting a recent project you're particularly proud of?"
+            )
+
         first_question = {
             "question_id": str(ObjectId()),
-            "question_text": f"Hi {session.get('candidate_name', 'there')}, I see you're interviewing for the {position} role. I've reviewed your resume. Could you start by introducing yourself and highlighting a recent project you're particularly proud of?",
+            "question_text": first_question_text,
             "difficulty": "easy",
             "category": "behavioral"
         }
@@ -336,13 +400,17 @@ async def submit_answer(session_id: str, body: SubmitAnswerRequest, db: AsyncIOM
         candidate_profile = {
             "skills": session.get("cv_extracted_skills", []),
             "projects": session.get("cv_projects", []),
-            "position": session.get("position", "Software Engineer")
+            "position": session.get("position", "Software Engineer"),
+            "interview_mode": session.get("interview_mode", "position"),
+            "course": session.get("course", ""),
         }
         
         evaluation = await evaluate_and_generate_next_question(
             chat_history=chat_history,
             candidate_profile=candidate_profile,
-            position=candidate_profile["position"]
+            position=candidate_profile["position"],
+            interview_mode=candidate_profile["interview_mode"],
+            course=candidate_profile["course"]
         )
 
         # Save response in traditional array format to preserve frontend compatibility
@@ -536,6 +604,8 @@ async def transition_to_coding(session_id: str, db: AsyncIOMotorDatabase = Depen
             raise HTTPException(status_code=404, detail="Session not found")
 
         skills = session.get("cv_extracted_skills", [])
+        interview_mode = session.get("interview_mode", "position")
+        course = session.get("course", "")
 
         # Find past problem IDs for this candidate to avoid duplicates
         past_sessions = await db["interview_sessions"].find(
@@ -575,8 +645,14 @@ async def transition_to_coding(session_id: str, db: AsyncIOMotorDatabase = Depen
             import re
             client = _get_groq_client()
             if client:
-                skill_str = ", ".join(skills[:3]) if skills else "general programming"
-                prompt = f"""Create a medium difficulty coding problem about {skill_str}.
+                if interview_mode == "course" and course:
+                    topic_str = course
+                    prompt = f"""Create a medium difficulty coding problem that tests knowledge of the course: {course}.
+The problem should require applying concepts from {course} (e.g. {', '.join(skills[:3]) if skills else 'core concepts'}).
+Return ONLY valid JSON: {{"title": "...", "description": "...", "difficulty": "medium", "skill_tags": [...], "template_code": {{"python": "# Write your solution here\\n", "javascript": "// Write your solution here\\n"}}}}"""
+                else:
+                    skill_str = ", ".join(skills[:3]) if skills else "general programming"
+                    prompt = f"""Create a medium difficulty coding problem about {skill_str}.
 Return ONLY valid JSON: {{"title": "...", "description": "...", "difficulty": "medium", "skill_tags": [...], "template_code": {{"python": "# Write your solution here\\n", "javascript": "// Write your solution here\\n"}}}}"""
                 try:
                     resp = client.chat.completions.create(

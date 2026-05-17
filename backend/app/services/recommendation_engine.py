@@ -52,13 +52,25 @@ async def generate_recommendations(session_data: dict) -> list:
     # Build context for LLM
     skills = session_data.get("cv_extracted_skills", [])
     position = session_data.get("position", "Software Engineer")
+    interview_mode = session_data.get("interview_mode", "position")
+    course = session_data.get("course", "")
 
-    if weak_areas:
-        context = f"Candidate applying for {position} had weak areas: {json.dumps(weak_areas[:5])}"
-        level = "beginner to intermediate"
+    if interview_mode == "course" and course:
+        subject = course
+        if weak_areas:
+            context = f"Student assessed on course '{course}' had weak areas: {json.dumps(weak_areas[:5])}"
+            level = "beginner to intermediate"
+        else:
+            context = f"Student assessed on course '{course}' covering topics: {', '.join(skills[:6])} performed well overall."
+            level = "intermediate to advanced"
     else:
-        context = f"Candidate applying for {position} with skills: {', '.join(skills[:6])} performed well overall."
-        level = "intermediate to advanced"
+        subject = position
+        if weak_areas:
+            context = f"Candidate applying for {position} had weak areas: {json.dumps(weak_areas[:5])}"
+            level = "beginner to intermediate"
+        else:
+            context = f"Candidate applying for {position} with skills: {', '.join(skills[:6])} performed well overall."
+            level = "intermediate to advanced"
 
     # Always get LLM recommendations
     client = _get_groq_client()

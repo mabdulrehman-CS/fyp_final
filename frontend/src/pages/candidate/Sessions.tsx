@@ -31,7 +31,7 @@ export default function CandidateSessions() {
     try {
       // Create endpoint in backend first /api/interview/sessions !
       // Using generic apiCall manually until added to client
-      const response = await fetch('http://localhost:8000/api/interview/sessions', {
+      const response = await fetch('/api/interview/sessions', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -96,7 +96,11 @@ export default function CandidateSessions() {
                       {session.status === 'completed' ? <CheckCircle className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-white capitalize">{session.position || 'General'} Interview</h3>
+                      <h3 className="text-lg font-semibold text-white capitalize">
+                        {(session as any).interview_mode === 'course'
+                          ? (session as any).course || 'Course'
+                          : `${session.position || 'General'} Interview`}
+                      </h3>
                       <div className="flex items-center gap-4 mt-2 text-sm text-gray-400">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-4 h-4" />

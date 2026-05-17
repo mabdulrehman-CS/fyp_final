@@ -76,8 +76,12 @@ const ReportView: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-8 print:mb-4">
           <div>
-            <h1 className="text-3xl font-bold text-white print:text-black mb-1">Interview Report</h1>
-            <p className="text-gray-400 print:text-gray-600">{report?.candidate_name || 'Candidate'} • Session {sessionId?.slice(0, 8)}</p>
+            <h1 className="text-3xl font-bold text-white print:text-black mb-1">
+              {report?.interview_mode === 'course' ? `${report?.course} Report` : 'Interview Report'}
+            </h1>
+            <p className="text-gray-400 print:text-gray-600">
+              {report?.candidate_name || 'Candidate'} • {report?.interview_mode === 'course' ? `Course: ${report?.course}` : `Position: ${report?.position || 'N/A'}`} • Session {sessionId?.slice(0, 8)}
+            </p>
           </div>
           <div className="flex items-center gap-4 print:hidden">
             {sessionId && (

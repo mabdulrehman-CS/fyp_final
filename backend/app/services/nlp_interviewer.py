@@ -320,7 +320,9 @@ Return ONLY valid JSON (no markdown):
 async def evaluate_and_generate_next_question(
     chat_history: list,
     candidate_profile: dict,
-    position: str
+    position: str,
+    interview_mode: str = "position",
+    course: str = ""
 ) -> dict:
     """Evaluate last answer and generate next contextual question."""
     client = _get_groq_client()
@@ -332,8 +334,44 @@ async def evaluate_and_generate_next_question(
     projects = json.dumps(candidate_profile.get("projects", []))
     skills = json.dumps(candidate_profile.get("skills", []))
 
+    # Count how many questions have been asked so far (for difficulty progression)
+    question_count = len([m for m in chat_history if m["role"] == "interviewer"])
+
     try:
-        prompt = f"""You are an expert technical interviewer conducting a conversational interview for the role of {position}.
+        if interview_mode == "course" and course:
+            # Course mode: difficulty progression
+            if question_count <= 2:
+                difficulty_instruction = "Ask a BASIC/EASY conceptual question about the course fundamentals."
+            elif question_count <= 5:
+                difficulty_instruction = "Ask a MEDIUM difficulty question that requires applying course concepts."
+            else:
+                difficulty_instruction = "Ask a HARD/ADVANCED question that tests deep understanding and edge cases."
+
+            prompt = f"""You are an expert professor conducting a conversational oral exam for the course: {course}.
+
+Course Topics to Cover: {skills}
+
+Difficulty Level for Next Question: {difficulty_instruction}
+
+Chat History:
+{history_str}
+
+Based on the LAST student answer above, first evaluate it. Then, craft a CONTINUOUS conversational follow-up question about {course}.
+- Questions must be strictly about {course} course content.
+- Follow the difficulty progression: start basic, then medium, then hard.
+- If they struggled, simplify or give a hint before moving on.
+- If they succeeded, go deeper into the topic.
+- Do NOT repeat past questions. Act like a natural conversational examiner.
+
+Return ONLY a valid JSON object matching this schema:
+{{
+  "score": <0-100 evaluation of their last answer>,
+  "feedback": "<very brief feedback on what they said>",
+  "next_question": "<the actual question to speak to them next>"
+}}"""
+        else:
+            # Position mode: existing behavior
+            prompt = f"""You are an expert technical interviewer conducting a conversational interview for the role of {position}.
 
 Candidate Profile Context:
 - Skills: {skills}

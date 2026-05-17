@@ -138,7 +138,11 @@ export default function AdminSessions() {
         {sessions.map((session) => (
           <TableRow key={session.id}>
             <TableCell className="font-medium">{session.candidate_name || session.candidate_email || session.candidate_id}</TableCell>
-            <TableCell className="capitalize">{session.interview_type}</TableCell>
+            <TableCell className="capitalize">
+              {(session as any).interview_mode === 'course'
+                ? `Course: ${(session as any).course || 'N/A'}`
+                : (session as any).position || session.interview_type || 'General'}
+            </TableCell>
             <TableCell>{formatDate(session.start_time || session.created_at)}</TableCell>
             <TableCell>{formatDuration(session)}</TableCell>
             {showStatus && <TableCell>{getStatusBadge(session.status)}</TableCell>}
