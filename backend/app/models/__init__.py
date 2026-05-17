@@ -31,7 +31,9 @@ class User(BaseModel):
     profile_info: Dict[str, Any] = Field(default_factory=dict)
     status: str = "active"
 
-    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class Question(BaseModel):
@@ -47,7 +49,9 @@ class Question(BaseModel):
     code_snippets: Optional[Dict[str, str]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class TestCase(BaseModel):
@@ -57,7 +61,8 @@ class TestCase(BaseModel):
     output: str = ""
     is_hidden: bool = False
 
-    model_config = {"populate_by_name": True}
+    class Config:
+        allow_population_by_field_name = True
 
 
 class Rubric(BaseModel):
@@ -66,7 +71,8 @@ class Rubric(BaseModel):
     criteria: List[str] = Field(default_factory=list)
     weights: List[float] = Field(default_factory=list)
 
-    model_config = {"populate_by_name": True}
+    class Config:
+        allow_population_by_field_name = True
 
 
 class Session(BaseModel):
@@ -76,7 +82,9 @@ class Session(BaseModel):
     scores: Dict[str, float] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class ActivityLog(BaseModel):
@@ -86,7 +94,9 @@ class ActivityLog(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class InvitedCandidate(BaseModel):
@@ -98,4 +108,6 @@ class InvitedCandidate(BaseModel):
     status: str = "pending"
     invitation_token: Optional[str] = None
 
-    model_config = {"populate_by_name": True, "json_encoders": {datetime: lambda v: v.isoformat()}}
+    class Config:
+        allow_population_by_field_name = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
