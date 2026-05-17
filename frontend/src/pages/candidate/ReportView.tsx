@@ -194,7 +194,7 @@ const ReportView: React.FC = () => {
                 <p className="text-2xl font-bold text-purple-400 print:text-black">{Math.round(behavioralData.avg_confidence || 0)}%</p>
               </div>
               <div className="bg-white/5 print:bg-white rounded-xl border border-white/10 print:border-gray-200 p-4 text-center">
-                <p className="text-gray-400 print:text-gray-500 text-xs mb-1">Emotion / Vibe</p>
+                <p className="text-gray-400 print:text-gray-500 text-xs mb-1">Facial Expressions</p>
                 <p className="text-2xl font-bold text-indigo-400 print:text-black capitalize">{behavioralData.dominant_emotion || "Neutral"}</p>
               </div>
             </div>
