@@ -1,11 +1,11 @@
 import pymongo
 from bson import json_util
-import json
 
-def dump_data():
+def dump_dataset():
     client = pymongo.MongoClient("mongodb://localhost:27017/")
     db = client["intraview_ai"]
     
+    # 1. Dump all other collections
     export_data = {}
     collections_to_dump = [
         "users", 
@@ -16,17 +16,19 @@ def dump_data():
         "activity_logs",
         "password_reset_otps"
     ]
-    
     for col in collections_to_dump:
-        documents = list(db[col].find({}))
-        export_data[col] = documents
-        print(f"Dumped {len(documents)} documents from '{col}'")
+        export_data[col] = list(db[col].find({}))
         
     with open("db_export.json", "w", encoding="utf-8") as f:
-        # Use json_util to correctly preserve MongoDB ObjectIds and DateTimes
         f.write(json_util.dumps(export_data, indent=2))
-    
-    print("\nDatabase export completed! Saved to 'db_export.json'")
+    print("Successfully exported user data!")
+
+    # 2. Dump exactly 100,000 questions
+    print("Exporting exactly 100,000 questions...")
+    questions = list(db["questions"].find().limit(100000))
+    with open("questions_export.json", "w", encoding="utf-8") as f:
+        f.write(json_util.dumps(questions))
+    print(f"Successfully exported {len(questions)} questions to 'questions_export.json'!")
 
 if __name__ == "__main__":
-    dump_data()
+    dump_dataset()
